@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Analysis — Gemini 2.5 Pro</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+</head>
+<body class="app-layout">
+  <div id="particlesContainer" class="particles-container"></div>
+  <aside id="historyPanel" class="history-sidebar" style="display: flex; flex-direction: column;">
+    <!-- History Header -->
+    <div class="history-panel-header">
+      <span class="history-title-pill">History</span>
+    </div>
+    
+    <!-- Search Bar -->
+    <div class="history-search-container">
+      <div class="history-search-icon">🔍</div>
+      <input type="text" id="historySearchInput" class="history-search-input" placeholder="Search history..." />
+    </div>
+    
+    <!-- History List -->
+    <ul id="historyList" class="history-list-modern" style="flex: 1; overflow-y: auto; overflow-x: hidden;"></ul>
+    
+    <!-- Storage Footer -->
+    <div class="history-storage-footer">
+      <div class="storage-row">
+        <span class="tiny muted">Storage</span>
+        <span id="historyStorageText" class="tiny muted">— / 20 GB</span>
+      </div>
+      <div class="storage-track">
+        <div id="historyStorageBar" class="storage-meter" style="width:0%"></div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main-content-wrapper star-container">
+    <div class="container">
+    <header class="header animate-pop">
+      <div class="title-wrap">
+        <h1>Video Analysis <span class="header-powered-by">— Powered By NB Media</span></h1>
+        <p class="subtitle muted">Upload or link a video, analyze with your prompt, and validate timestamps in-app.</p>
+      </div>
+      <div class="header-actions">
+        <button id="newAnalysisBtnSide" class="btn primary new-analysis-header-btn" type="button" title="Start a new analysis">
+          <span class="new-analysis-icon">✏️</span>
+          <span>New Analysis</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Tabs: Analyze / Results -->
+    <div class="tabs tabs-main" style="margin-bottom:14px;">
+      <button class="tab active" data-tab-main="analyze">
+        Analyze
+        <span class="tab-underline"></span>
+      </button>
+      <button class="tab" data-tab-main="results">
+        Results
+        <span class="tab-underline"></span>
+      </button>
+    </div>
+
+    <!-- Analyze (Input) view -->
+    <div class="main-tab-content active" id="tab-analyze-main">
+    <section class="grid-top">
+      <div class="stack-left">
+        <section class="panel animate-slide">
+    
+          <h2 class="panel-title">Input</h2>
+
+
+          <div id="dropZone" class="dropzone" tabindex="0" aria-label="Drag & drop a video">
+            <input id="video" name="video" type="file" accept="video/*" hidden />
+            <div class="dz-body">
+              <div class="clapperboard-icon-wrapper">
+                <div class="clapperboard-icon">
+                  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                      <linearGradient id="clapperGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#a78bfa;stop-opacity:1" />
+                        <stop offset="50%" style="stop-color:#ec4899;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#f472b6;stop-opacity:1" />
+                      </linearGradient>
+                    </defs>
+                    <rect x="15" y="20" width="70" height="50" rx="2" fill="url(#clapperGradient)"/>
+                    <rect x="20" y="25" width="60" height="40" fill="rgba(0,0,0,0.3)"/>
+                    <line x1="20" y1="35" x2="80" y2="35" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+                    <line x1="20" y1="45" x2="80" y2="45" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+                    <line x1="20" y1="55" x2="80" y2="55" stroke="rgba(255,255,255,0.3)" stroke-width="1.5"/>
+                    <rect x="15" y="70" width="15" height="12" rx="1" fill="url(#clapperGradient)"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="dz-content">
+                <div class="dz-title">Drag & drop a video</div>
+                <div class="dz-sub">or <button id="browseBtn" type="button" class="link">browse</button></div>
+              </div>
+            </div>
+            <div id="fileInfo" class="dz-file hidden"></div>
+          </div>
+
+          <div class="divider"><span>OR</span></div>
+
+          <label class="field">
+            <span>YouTube URL</span>
+            <input id="url" name="url" type="url" placeholder="https://www.youtube.com/watch?v=..." />
+          </label>
+
+          <label class="field">
+            <span>Additional Instructions (Optional)</span>
+            <textarea id="prompt" name="prompt" rows="6" placeholder="e.g., 'Focus on the blue car.' or 'Transcribe all speech.'"></textarea>
+          </label>
+
+          <div class="actions">
+            <button id="submitBtn" class="btn primary" type="button" onclick="document.getElementById('form').requestSubmit()">Analyze</button>
+            <button id="clearBtn" class="btn ghost" type="button">Clear</button>
+          </div>
+        </section>
+
+        
+      </div>
+      
+    </section>
+    </div>
+
+    <form id="form" class="hidden" aria-hidden="true"></form>
+
+    <!-- Results view -->
+    <div class="main-tab-content" id="tab-results-main">
+    <section class="card glass animate-pop">
+      <div class="tabs">
+        <button class="tab active" data-tab="structured">
+          Structured
+          <span class="tab-underline"></span>
+        </button>
+        <button class="tab" data-tab="raw">
+          Raw stream
+          <span class="tab-underline"></span>
+        </button>
+      </div>
+
+      <div class="results-actions" style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:8px;">
+        <button id="shareBtn" class="btn ghost" type="button" disabled>🔗 Share</button>
+      </div>
+
+      <div class="tab-content active" id="tab-structured">
+        <div class="output-grid">
+          <div class="output-left-stack">
+            <aside class="panel player-panel">
+              <h2 class="panel-title">Player</h2>
+              <div class="player-wrap">
+                <video id="player" class="player hidden" controls playsinline></video>
+                <div class="yt-wrap hidden" id="ytWrap">
+                  <iframe
+                    id="ytFrame"
+                    title="YouTube video player"
+                    allow="autoplay; encrypted-media; picture-in-picture"
+                    allowfullscreen
+                    referrerpolicy="strict-origin-when-cross-origin">
+                  </iframe>
+                </div>
+              </div>
+              <div class="muted tiny">Tip: click a timestamp below to jump here.</div>
+            </aside>
+          </div>
+
+          <div class="output-right-stack">
+            <section class="panel animate-fade delay-1">
+              <div class="panel-header-row">
+                <h2 class="panel-title">Timestamps</h2>
+                <div class="filter-pill" id="activeFilterPill">All</div>
+                <div class="dropdown" style="margin-left:auto; position:relative;">
+                  <button id="tsFilterBtn" class="btn">Filter</button>
+                  <div id="tsFilterDropdown" class="dropdown-content hidden" style="position:absolute; right:0; top:calc(100% + 6px); min-width: 220px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; z-index: 10;">
+                    <button class="filter-option btn ghost" data-filter="all" style="width:100%">All</button>
+                    <button class="filter-option btn ghost" data-filter="911_call" style="width:100%">911 Call</button>
+                    <button class="filter-option btn ghost" data-filter="investigation" style="width:100%">Investigation</button>
+                    <button class="filter-option btn ghost" data-filter="interrogation" style="width:100%">Interrogation</button>
+                    <button class="filter-option btn ghost" data-filter="cctv" style="width:100%">CCTV Footage</button>
+                    <button class="filter-option btn ghost" data-filter="body_cam" style="width:100%">Body Cam Footages</button>
+                  </div>
+                </div>
+              </div>
+              <div id="timestamps" class="table-wrap hidden">
+                <table class="table table-hover-lift">
+                  <thead><tr><th style="width:140px">Time</th><th>Description</th></tr></thead>
+                  <tbody id="timestampsBody"></tbody>
+                </table>
+              </div>
+
+              <div class="timestamp-cards-container" id="timestampCards"></div>
+            </section>
+          </div>
+        </div>
+        <div class="summary-meta-grid">
+          <section class="panel animate-fade">
+            <h2 class="panel-title">Summary</h2>
+            <div id="summary" class="summary muted">—</div>
+          </section>
+
+          <section class="panel animate-fade">
+            <div id="meta" class="table-wrap hidden">
+              <h3>Metadata</h3>
+              <table class="table">
+                <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                <tbody id="metaBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-raw">
+        <div class="results-actions">
+          <button id="copyBtn" class="btn ghost" type="button">Copy</button>
+          <button id="saveBtn" class="btn ghost" type="button">Save .txt</button>
+        </div>
+        <pre id="results" class="results-pre" aria-live="polite"></pre>
+      </div>
+
+    </section>
+    </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <div id="progressModal" class="progress-modal hidden">
+    <div class="progress-modal-content glass">
+      
+      <h3 id="progressStatus" class="mono" style="font-size: 20px; margin-bottom: 20px;">Initializing...</h3>
+      
+      <ol class="stepper" id="modalStepper">
+        <li data-step="queued" class="step">Job Queued</li>
+        <li data-step="uploading" class="step">Uploading Video</li>
+        <li data-step="processing" class="step">Processing Video</li>
+        <li data-step="analyzing" class="step">Analyzing Content</li>
+      </ol>
+      
+      <div class="progress-bar-container" style="margin: 20px 0 10px 0;">
+        <div class="progress-linear">
+          <div id="progressLinearBar" class="progress-linear-meter"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 6px;">
+          <span id="progressPercent" class="tiny muted">0%</span>
+          <span class="tiny muted">Processing...</span>
+        </div>
+      </div>
+      
+      <p class="tiny muted" style="margin-top: 10px;">Please wait while your video is processed.</p>
+    </div>
+  </div>
+
+  <!-- Delete Progress Modal -->
+  <div id="deleteProgressModal" class="delete-progress-modal hidden">
+    <div class="delete-progress-content glass">
+      <div class="delete-icon">🗑️</div>
+      <h3 id="deleteStatus" class="mono" style="font-size: 18px; margin: 16px 0;">Deleting...</h3>
+      <div class="delete-progress-bar-container">
+        <div class="delete-progress-track">
+          <div id="deleteProgressBar" class="delete-progress-fill"></div>
+        </div>
+        <div class="delete-progress-text">
+          <span id="deleteProgressPercent" class="tiny">0%</span>
+        </div>
+      </div>
+      <p class="tiny muted" style="margin-top: 12px;" id="deleteMessage">Removing files...</p>
+    </div>
+  </div>
+  <script src="script.js" type="module"></script>
+</body>
+</html>

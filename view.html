@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>View Analysis — Gemini 2.5 Pro</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+</head>
+<body class="share-view">
+  <main class="container">
+    <header class="header glass animate-pop">
+      <div class="title-wrap">
+        <h1>View Video Analysis</h1>
+        <p class="subtitle muted">This is a shared, view-only analysis powered by Gemini 2.5 Pro.</p>
+      </div>
+       <div class="header-actions">
+        <a class="btn ghost" href="./">← Create New Analysis</a>
+      </div>
+    </header>
+
+    <section>
+      <div class="stack-left">
+         <section class="card glass animate-pop">
+            <div class="tabs">
+              <button class="tab active" data-tab="structured">Structured</button>
+              <button class="tab" data-tab="raw">Raw stream</button>
+            </div>
+            <div class="tab-content active" id="tab-structured">
+              <div class="output-grid">
+                <div class="output-left-stack">
+                  <section class="panel animate-fade delay-1">
+                    <div class="panel-header-row">
+                      <h2 class="panel-title">Timestamps</h2>
+                    </div>
+                    <div class="timestamp-cards-container" id="timestampCards"></div>
+                  </section>
+                </div>
+
+                <div class="output-right-stack">
+                  <aside class="panel">
+                    <h2 class="panel-title">Player</h2>
+                    <div class="player-wrap">
+                      <video id="sharedPlayer" class="player hidden" controls playsinline></video>
+                      <div class="yt-wrap hidden" id="ytWrap">
+                        <iframe id="ytFrame" title="YouTube video player" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+                      </div>
+                    </div>
+                    <div class="tiny muted">Tip: click a timestamp to jump here.</div>
+                    <div id="videoNotice" class="tiny muted hidden">Original upload was a local file; video content cannot be included in the share link.</div>
+                  </aside>
+                </div>
+              </div>
+
+              <div class="summary-meta-grid">
+                <section class="panel animate-fade">
+                  <h2 class="panel-title">Summary</h2>
+                  <div id="summary" class="summary muted">—</div>
+                </section>
+                <section class="panel animate-fade">
+                  <div id="meta" class="table-wrap hidden">
+                    <h3>Metadata</h3>
+                    <table class="table">
+                        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                        <tbody id="metaBody"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="tab-content" id="tab-raw">
+              <pre id="results" class="results-pre" style="max-height: 500px; overflow: auto; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 12px;"></pre>
+            </div>
+         </section>
+      </div>
+    </section>
+  </main>
+  
+  <script src="viewer.js" type="module"></script>
+</body>
+</html>

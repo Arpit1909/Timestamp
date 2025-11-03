@@ -1,0 +1,17 @@
+node_modules/
+npm-debug.log*
+yarn.lock
+package-lock.json
+
+.env
+*.tmp
+*.part
+*.partial
+tmp/
+temp/
+.DS_Store
+
+*.mp4
+*.mkv
+*.webm
+*.mov
