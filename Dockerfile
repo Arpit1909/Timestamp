@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     git \
     wget \
     ca-certificates \
+    python3 \
     --no-install-recommends && \
     \
     # Now, install the LATEST yt-dlp binary directly
