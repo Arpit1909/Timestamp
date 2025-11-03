@@ -9,11 +9,14 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     wget \
+    ca-certificates \
     --no-install-recommends && \
     \
+    # Now, install the LATEST yt-dlp binary directly
     wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp && \
     \
+    # Clean up apt
     rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and package-lock.json
