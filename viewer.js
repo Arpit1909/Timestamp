@@ -131,26 +131,90 @@ function buildStructuredOutput(text) {
   })();
 
   const grouped = normalized.reduce((acc, ts) => {
-    const cat = ts.category.trim();
+    const cat = String(ts.category || '').trim().slice(0, 100);
+    if (!cat) return acc;
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(ts);
     return acc;
   }, {});
+
   let cardsHtml = '';
-  for (const [category, items] of Object.entries(grouped)) {
-    const catClass = categoryClass(category);
+  for (const category in grouped) {
+    const items = grouped[category];
+    const safeCategory = escapeHTML(String(category || '').slice(0, 100));
+    const count = items.length;
     
-    const rows = items.map(it => {
-        const label = escapeHTML(it.displayTime || it.time);
-        return `<div class="timestamp-card ${catClass}"><h3><button class="link ts-jump" data-ts="${label}"><span class="pill-time">${label}</span></button></h3><p class="ts-desc">${escapeHTML(it.description || '')}</p></div>`;
+    // Build entries HTML
+    const entriesHtml = items.slice(0, 500).map(it => { // Limit to 500 items per category
+      const label = escapeHTML(String(it.displayTime || it.time || '').slice(0, 50));
+      const desc = escapeHTML(String(it.description || '').slice(0, 500));
+      return `<div class="accordion-entry">
+        <button class="accordion-entry-time ts-jump" data-ts="${label}" type="button">${label}</button>
+        <div class="accordion-entry-description">${desc}</div>
+      </div>`;
     }).join('');
-    cardsHtml += `<div class="timestamp-card-group"><h2 class="panel-title">${escapeHTML(category)}</h2><div class="timestamp-card-list">${rows}</div></div>`;
+    
+    // Build accordion item HTML
+    cardsHtml += `<div class="accordion-item">
+      <button class="accordion-header" type="button" aria-expanded="false">
+        <span class="accordion-icon"></span>
+        <span class="accordion-title">
+          <span>${safeCategory}</span>
+          <span class="accordion-count">(${count})</span>
+        </span>
+      </button>
+      <div class="accordion-content">
+        <div class="accordion-content-inner">${entriesHtml}</div>
+      </div>
+    </div>`;
   }
-  timestampCardsContainer.innerHTML = cardsHtml || `<div class="muted">No timestamps found.</div>`;
+  
+  if (timestampCardsContainer) {
+    // Wrap in accordion-container
+    const accordionHtml = cardsHtml 
+      ? `<div class="accordion-container">${cardsHtml}</div>`
+      : `<div class="muted">No timestamps found.</div>`;
+    timestampCardsContainer.innerHTML = accordionHtml;
+    
+    // Initialize accordion functionality after rendering
+    initializeAccordion();
+  }
+}
+
+// Initialize accordion functionality
+function initializeAccordion() {
+  const accordionHeaders = document.querySelectorAll('.accordion-header');
+  
+  accordionHeaders.forEach(header => {
+    header.addEventListener('click', () => {
+      const isActive = header.classList.contains('active');
+      const content = header.nextElementSibling;
+      
+      // Close all accordions first
+      accordionHeaders.forEach(h => {
+        const c = h.nextElementSibling;
+        h.classList.remove('active');
+        h.setAttribute('aria-expanded', 'false');
+        if (c) {
+          c.style.maxHeight = '0';
+        }
+      });
+      
+      // If the clicked header wasn't active, open it
+      if (!isActive && content) {
+        header.classList.add('active');
+        header.setAttribute('aria-expanded', 'true');
+        // Set max-height to scrollHeight for smooth expansion
+        content.style.maxHeight = content.scrollHeight + 'px';
+      }
+    });
+  });
 }
 
 function timeToSeconds(ts) {
-  const startTime = (ts || '').split(' - ')[0].trim();
+  // Get just the start time, e.g., "00:45 - 01:00" -> "00:45"
+  const startTime = (ts || '').split(' - ')[0].trim(); 
+  
   const parts = (startTime || '').split(':').map(x => parseInt(x, 10));
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];

@@ -147,6 +147,23 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// CORS configuration (if needed for production)
+// Note: Install 'cors' package if you need CORS support: npm install cors
+// Uncomment and configure if deploying to a domain:
+/*
+if (process.env.ALLOWED_ORIGINS) {
+  import('cors').then(corsModule => {
+    app.use(corsModule.default({
+      origin: process.env.ALLOWED_ORIGINS.split(','),
+      credentials: true,
+      optionsSuccessStatus: 200
+    }));
+  }).catch(err => {
+    console.warn('CORS module not available. Install with: npm install cors');
+  });
+}
+*/
+
 // Logging
 if (isProduction) {
   app.use(morgan('combined'));
@@ -163,30 +180,27 @@ app.use('/shared', express.static(SHARED_DIR, { fallthrough: true, setHeaders: (
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 } }));
 
-// -------- In-memory queue (runs in background) --------
-const CONCURRENCY_LIMIT = 5;
-let activeJobs = 0;
-const jobQueue = []; // queue of { jobId, jobData }
+// Helper to update a job's JSON file
+const updateJobFile = async (jobId, data) => {
+  const jobFilePath = path.join(JOB_DIR, `${jobId}.json`);
+  try {
+    const current = JSON.parse(await fsp.readFile(jobFilePath, 'utf8'));
+    await fsp.writeFile(jobFilePath, JSON.stringify({ ...current, ...data }, null, 2));
+  } catch (e) { 
+    console.error(`Failed to update job file ${jobId}:`, e);
+    // Try to write a minimal update if read fails
+    try {
+      const minimalData = { id: jobId, ...data };
+      await fsp.writeFile(jobFilePath, JSON.stringify(minimalData, null, 2));
+    } catch (e2) {
+      console.error(`Critical: Cannot write job file ${jobId}:`, e2);
+    }
+  }
+};
 
 // This is the new "run" function for the queue
 async function runAnalysisJob(jobId, jobData) {
   const { localPath, prompt, fileUri, geminiFileName, cleanupPath } = jobData;
-
-  const updateJobFile = async (data) => {
-    const jobFilePath = path.join(JOB_DIR, `${jobId}.json`);
-    try {
-      const current = JSON.parse(await fsp.readFile(jobFilePath, 'utf8'));
-      await fsp.writeFile(jobFilePath, JSON.stringify({ ...current, ...data }, null, 2));
-    } catch (e) { 
-      console.error(`Failed to update job file ${jobId}:`, e);
-      // Try to write a minimal update if read fails
-      try {
-        await fsp.writeFile(jobFilePath, JSON.stringify({ ...jobData, ...data }, null, 2));
-      } catch (e2) {
-        console.error(`Critical: Cannot write job file ${jobId}:`, e2);
-      }
-    }
-  };
 
   let uploadedFile = { file: { name: geminiFileName, uri: fileUri } };
 
@@ -205,7 +219,7 @@ async function runAnalysisJob(jobId, jobData) {
 
     // 1. (Optional) Upload to Gemini if not already done
     if (!uploadedFile.file.name && localPath) {
-      await updateJobFile({ status: 'PROCESSING', progressLabel: 'Uploading to Gemini...' });
+      await updateJobFile(jobId, { status: 'PROCESSING', progressLabel: 'Uploading to Gemini...' });
       
       const mimeType = getMimeType(localPath);
       if (!mimeType || mimeType === 'application/octet-stream') {
@@ -222,33 +236,38 @@ async function runAnalysisJob(jobId, jobData) {
       }
       
       // Save the uploaded file name back to the job file
-      await updateJobFile({ geminiFileName: uploadedFile.file.name });
+      await updateJobFile(jobId, { geminiFileName: uploadedFile.file.name });
     }
 
     // 2. Wait for ACTIVE
-    await updateJobFile({ status: 'PROCESSING', progressLabel: 'Waiting for ACTIVE...' });
+    await updateJobFile(jobId, { status: 'PROCESSING', progressLabel: 'Waiting for ACTIVE...' });
     const ready = await waitForActive(uploadedFile.file.name);
     const finalFileUri = ready.file?.uri || uploadedFile.file?.uri;
     if (!finalFileUri) throw new Error('Gemini did not return a file URI.');
 
     // 3. Stream generation
-    await updateJobFile({ status: 'PROCESSING', progressLabel: 'Analyzing...' });
+    await updateJobFile(jobId, { status: 'PROCESSING', progressLabel: 'Analyzing...' });
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-pro' }, { timeout: 10 * 60 * 1000 }); // 10 min timeout
     
+    // --- START PROMPT INJECTION FIX ---
     const userQuery = (prompt || '').trim();
-    let finalPrompt = DEFAULT_PROMPT;
+
+    // Build the parts array
+    const parts = [
+      { text: DEFAULT_PROMPT }, // System prompt
+      { fileData: { mimeType: getMimeType(localPath) || 'video/mp4', fileUri: finalFileUri } }
+    ];
+
+    // Only add the user prompt part if it exists
     if (userQuery) {
-      finalPrompt += `\n\nADDITIONAL USER INSTRUCTION:\n${userQuery}`;
+      // Insert user prompt *after* system prompt but *before* file
+      parts.splice(1, 0, { text: `ADDITIONAL USER INSTRUCTION:\n${userQuery}` }); 
     }
 
     const requestPayload = {
-      contents: [{
-        parts: [
-          { text: finalPrompt },
-          { fileData: { mimeType: getMimeType(localPath) || 'video/mp4', fileUri: finalFileUri } }
-        ]
-      }]
+      contents: [{ parts: parts }]
     };
+    // --- END PROMPT INJECTION FIX ---
 
     const streamResp = await streamWithRetry(model, requestPayload, {
       attempts: 5, // More retries for reliability
@@ -266,7 +285,7 @@ async function runAnalysisJob(jobId, jobData) {
     }
 
     // 4. Job Complete
-    await updateJobFile({
+    await updateJobFile(jobId, {
       status: 'COMPLETE',
       progressLabel: 'Complete',
       analysisText: fullAnalysisText,
@@ -277,7 +296,7 @@ async function runAnalysisJob(jobId, jobData) {
   } catch (e) {
     const errorMsg = e?.message || String(e);
     console.error(`Job ${jobId} failed:`, errorMsg);
-    await updateJobFile({
+    await updateJobFile(jobId, {
       status: 'FAILED',
       progressLabel: 'Failed',
       analysisText: errorMsg,
@@ -289,25 +308,54 @@ async function runAnalysisJob(jobId, jobData) {
     // We *keep* the Gemini file for now, in case of re-analysis.
     // We will delete it when the history item is deleted.
 
-    // Signal queue that this job is done
-    activeJobs -= 1;
-    processQueue(); // Check for next job
+    // --- REMOVED ---
+    // activeJobs -= 1;
+    // processQueue(); 
   }
 }
 
-function processQueue() {
-  while (activeJobs < CONCURRENCY_LIMIT && jobQueue.length > 0) {
-    const { jobId, jobData } = jobQueue.shift();
-    activeJobs += 1;
+// -------- New File-Based Job Worker --------
+let isWorkerRunning = false;
+async function jobWorker() {
+  if (isWorkerRunning) return; // Prevent concurrent runs
+  isWorkerRunning = true;
+  // console.log('Worker: Checking for jobs...'); // (Uncomment for debugging)
 
-    // Run the job, but don't wait for it
-    runAnalysisJob(jobId, jobData).catch(err => {
-      console.error(`CRITICAL: Job ${jobId} failed outside runAnalysisJob:`, err);
-      activeJobs -= 1;
-      processQueue();
-    });
+  try {
+    const files = await fsp.readdir(JOB_DIR);
+    const jobFiles = files.filter(f => f.endsWith('.json')).sort(); // Sorts by oldest (timestamp)
+    
+    let foundJobId = null;
+    let foundJobData = null;
+
+    for (const file of jobFiles) {
+      const jobId = file.replace('.json', '');
+      const jobData = await readJobFile(jobId);
+      if (jobData && jobData.status === 'QUEUED') {
+        foundJobId = jobId;
+        foundJobData = jobData;
+        break; // Found the oldest queued job
+      }
+    }
+
+    if (foundJobId && foundJobData) {
+      console.log(`Worker: Found job ${foundJobId}, starting...`);
+      // "Lock" the job by updating its status
+      await updateJobFile(foundJobId, { status: 'PROCESSING', progressLabel: 'Starting...' });
+      // Run the job to completion
+      await runAnalysisJob(foundJobId, foundJobData);
+      console.log(`Worker: Finished job ${foundJobId}.`);
+    }
+  } catch (err) {
+    console.error('Error in job worker:', err);
   }
+  isWorkerRunning = false;
 }
+
+// Start the worker to poll every 10 seconds
+console.log('Starting persistent job worker...');
+setInterval(jobWorker, 10000); // Poll every 10 seconds
+jobWorker(); // Run once on start
 
 const TOTAL_STORAGE_BYTES = 20 * 1024 * 1024 * 1024; // 20GB
 
@@ -316,10 +364,9 @@ const TOTAL_STORAGE_BYTES = 20 * 1024 * 1024 * 1024; // 20GB
 // Helper to sanitize job ID (prevent path traversal)
 function sanitizeJobId(jobId) {
   if (!jobId || typeof jobId !== 'string') return null;
-  // Only allow alphanumeric characters, hyphens, and underscores
-  const sanitized = String(jobId).replace(/[^a-zA-Z0-9_-]/g, '');
-  // Prevent path traversal attempts
-  if (sanitized.includes('..') || sanitized.includes('/') || sanitized.includes('\\')) {
+  // Only allow numeric job IDs (timestamps)
+  const sanitized = String(jobId).replace(/[^0-9]/g, '');
+  if (sanitized !== String(jobId)) {
     return null;
   }
   return sanitized;
@@ -415,6 +462,31 @@ const isYouTubeUrl = (url) => {
 };
 const deleteIfExists = async (p) => { if (p) { try { await fsp.unlink(p); } catch {} } };
 function getMimeType(filePath) { return mimeLookup(path.extname(filePath)) || 'application/octet-stream'; }
+
+// Sanitize error messages for production (don't expose internal details)
+function sanitizeErrorMessage(error, defaultMessage = 'An error occurred') {
+  if (!isProduction) {
+    // In development, return full error message for debugging
+    return error?.message || String(error) || defaultMessage;
+  }
+  // In production, only return safe user-friendly messages
+  const msg = String(error?.message || error || '').toLowerCase();
+  
+  // Allow specific known error messages that are safe for users
+  if (msg.includes('youtube download failed') || 
+      msg.includes('youtube video is') ||
+      msg.includes('file too large') ||
+      msg.includes('invalid url') ||
+      msg.includes('file upload error') ||
+      msg.includes('missing') ||
+      msg.includes('invalid job id') ||
+      msg.includes('not found')) {
+    return error?.message || defaultMessage;
+  }
+  
+  // For other errors, return generic message
+  return defaultMessage;
+}
 
 // ffmpeg detection (supports Windows, Linux, macOS)
 async function hasFfmpeg() {
@@ -820,7 +892,8 @@ app.post('/upload', (req, res) => {
           }
 
         } catch (e) {
-          return res.status(500).json({ message: `YouTube download failed: ${e.message}` });
+          const safeMsg = sanitizeErrorMessage(e, 'YouTube download failed. Please try again or use a different video.');
+          return res.status(500).json({ message: safeMsg });
         }
       }
 
@@ -844,20 +917,19 @@ app.post('/upload', (req, res) => {
 
         await fsp.writeFile(jobFilePath, JSON.stringify(jobData, null, 2));
 
-        // --- Step 3: Add to queue and respond immediately ---
-        jobQueue.push({ jobId, jobData });
-        processQueue();
+        // --- Step 3: The worker will pick up the 'QUEUED' job from the file system.
 
         res.status(202).json({ jobId: jobId });
 
       } catch (e) {
         console.error('Error in upload handler:', e);
         await deleteIfExists(cleanupPath); // Clean up if we failed before queuing
-        res.status(500).json({ message: e?.message || 'Failed to queue job' });
+        const safeMsg = sanitizeErrorMessage(e, 'Failed to queue job. Please try again.');
+        res.status(500).json({ message: safeMsg });
       }
     } catch (outerErr) {
       console.error('Outer error in upload handler:', outerErr);
-      res.status(500).json({ message: 'Internal server error' });
+      res.status(500).json({ message: 'Internal server error. Please try again.' });
     }
   });
 });
@@ -949,7 +1021,8 @@ app.put('/api/history/:id', async (req, res) => {
     res.json(job);
   } catch (e) { 
     console.error('Update job error:', e);
-    res.status(500).json({ message: e?.message || 'Failed to update' }); 
+    const safeMsg = sanitizeErrorMessage(e, 'Failed to update. Please try again.');
+    res.status(500).json({ message: safeMsg }); 
   }
 });
 
@@ -1005,7 +1078,8 @@ app.delete('/api/history/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { 
     console.error('Delete job error:', e);
-    res.status(500).json({ message: e?.message || 'Failed to delete' }); 
+    const safeMsg = sanitizeErrorMessage(e, 'Failed to delete. Please try again.');
+    res.status(500).json({ message: safeMsg }); 
   }
 });
 
@@ -1057,10 +1131,21 @@ async function cleanupOldFiles() {
             const age = now - createdAt;
             if (age > 7 * 24 * 60 * 60 * 1000) { // 7 days
               await deleteIfExists(path.join(JOB_DIR, jobs[i].file));
-              // Also clean up associated shared file
+              // Also clean up associated shared file (with path validation)
               if (job.videoUrl && job.videoUrl.startsWith('/shared/')) {
-                const shareFileName = decodeURIComponent(job.videoUrl.replace('/shared/', ''));
-                await deleteIfExists(path.join(SHARED_DIR, shareFileName));
+                try {
+                  const shareFileName = decodeURIComponent(job.videoUrl.replace('/shared/', ''));
+                  // Sanitize filename to prevent path traversal
+                  const safeFileName = path.basename(shareFileName);
+                  const shareFilePath = path.join(SHARED_DIR, safeFileName);
+                  const resolvedSharePath = path.resolve(shareFilePath);
+                  const resolvedShareDir = path.resolve(SHARED_DIR);
+                  if (resolvedSharePath.startsWith(resolvedShareDir)) {
+                    await deleteIfExists(shareFilePath);
+                  }
+                } catch (e) {
+                  console.warn('Error cleaning up shared file during cleanup:', e);
+                }
               }
             }
           }
@@ -1077,11 +1162,55 @@ setInterval(cleanupOldFiles, 6 * 60 * 60 * 1000);
 // Run once on startup
 cleanupOldFiles();
 
+// Global error handlers for production
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit in production, but log the error
+  if (!isProduction) {
+    console.error('Stack:', reason?.stack || 'No stack trace');
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // In production, we might want to exit gracefully
+  if (isProduction) {
+    console.error('Critical error, shutting down gracefully...');
+    process.exit(1);
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 const server = app.listen(PORT, () => {
   console.log(`✅ Server listening on http://localhost:${PORT}`);
   console.log(`📁 Job directory: ${JOB_DIR}`);
   console.log(`📁 Shared directory: ${SHARED_DIR}`);
-  console.log(`⚙️  Concurrency limit: ${CONCURRENCY_LIMIT}`);
+  console.log(`⚙️  File-based job worker: polling every 10 seconds`);
 });
 server.headersTimeout = 60 * 1000;
 server.requestTimeout = 0;
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});

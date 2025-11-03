@@ -1129,25 +1129,78 @@ function buildStructuredOutput(text) {
       if (!passesFilter(category)) continue;
 
       const items = grouped[category];
-      const catClass = categoryClass(category);
+      const safeCategory = escapeHTML(String(category || '').slice(0, 100));
+      const count = items.length;
       
-      const rows = items.slice(0, 500).map(it => { // Limit to 500 items per category
+      // Build entries HTML
+      const entriesHtml = items.slice(0, 500).map(it => { // Limit to 500 items per category
         const label = escapeHTML(String(it.displayTime || it.time || '').slice(0, 50));
         const desc = escapeHTML(String(it.description || '').slice(0, 500));
-        return `<div class="timestamp-card ${catClass}"><h3><button class="link ts-jump" data-ts="${label}"><span class="pill-time">${label}</span></button></h3><p class="ts-desc">${desc}</p></div>`;
+        return `<div class="accordion-entry">
+          <button class="accordion-entry-time ts-jump" data-ts="${label}" type="button">${label}</button>
+          <div class="accordion-entry-description">${desc}</div>
+        </div>`;
       }).join('');
       
-      const safeCategory = escapeHTML(String(category || '').slice(0, 100));
-      cardsHtml += `<div class="timestamp-card-group"><h2 class="panel-title">${safeCategory}</h2><div class="timestamp-card-list">${rows}</div></div>`;
+      // Build accordion item HTML
+      cardsHtml += `<div class="accordion-item">
+        <button class="accordion-header" type="button" aria-expanded="false">
+          <span class="accordion-icon"></span>
+          <span class="accordion-title">
+            <span>${safeCategory}</span>
+            <span class="accordion-count">(${count})</span>
+          </span>
+        </button>
+        <div class="accordion-content">
+          <div class="accordion-content-inner">${entriesHtml}</div>
+        </div>
+      </div>`;
     }
     if (timestampCardsContainer) {
-      timestampCardsContainer.innerHTML = cardsHtml || `<div class="muted">No timestamps detected yet.</div>`;
+      // Wrap in accordion-container
+      const accordionHtml = cardsHtml 
+        ? `<div class="accordion-container">${cardsHtml}</div>`
+        : `<div class="muted">No timestamps detected yet.</div>`;
+      timestampCardsContainer.innerHTML = accordionHtml;
+      
+      // Initialize accordion functionality after rendering
+      initializeAccordion();
     }
   } catch (error) {
     console.error('Error building structured output:', error);
     if (summaryEl) summaryEl.innerHTML = '<span class="muted">Error parsing analysis results.</span>';
     if (timestampCardsContainer) timestampCardsContainer.innerHTML = '<div class="muted">Error displaying timestamps.</div>';
   }
+}
+
+// Initialize accordion functionality
+function initializeAccordion() {
+  const accordionHeaders = document.querySelectorAll('.accordion-header');
+  
+  accordionHeaders.forEach(header => {
+    header.addEventListener('click', () => {
+      const isActive = header.classList.contains('active');
+      const content = header.nextElementSibling;
+      
+      // Close all accordions first
+      accordionHeaders.forEach(h => {
+        const c = h.nextElementSibling;
+        h.classList.remove('active');
+        h.setAttribute('aria-expanded', 'false');
+        if (c) {
+          c.style.maxHeight = '0';
+        }
+      });
+      
+      // If the clicked header wasn't active, open it
+      if (!isActive && content) {
+        header.classList.add('active');
+        header.setAttribute('aria-expanded', 'true');
+        // Set max-height to scrollHeight for smooth expansion
+        content.style.maxHeight = content.scrollHeight + 'px';
+      }
+    });
+  });
 }
 
 function timeToSeconds(ts) {
@@ -1309,9 +1362,10 @@ async function renderHistory() {
 
     const timeAgoStr = timeAgo(item.createdAt || item.id);
 
-    // New layout: name on left, timestamp on right
+    // New layout: name on left, timestamp on right (ESCAPED to prevent XSS)
+    const safeName = escapeHTML(String(item.name || 'Untitled').slice(0, 200));
     li.innerHTML = `
-      <span class="history-name" title="${item.name}">${item.name}</span>
+      <span class="history-name" title="${safeName}">${safeName}</span>
       <span class="history-timestamp">${timeAgoStr}</span>
       <div class="history-menu">
         <button class="history-menu-toggle">⋮</button>

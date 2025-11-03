@@ -3,7 +3,8 @@ npm-debug.log*
 yarn.lock
 package-lock.json
 
-
+.env
+.env.*
 *.tmp
 *.part
 *.partial
