@@ -5,7 +5,6 @@ FROM node:20-slim
 WORKDIR /app
 
 # Install system dependencies: ffmpeg, yt-dlp, and python
-# Removed 'git' as it's not a runtime dependency
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     wget \
@@ -20,22 +19,22 @@ RUN apt-get update && apt-get install -y \
     # Clean up apt cache
     rm -rf /var/lib/apt/lists/*
 
-# Copy package.json and package-lock.json
+# Copy package.json and package-lock.json (if it exists)
 COPY package*.json ./
 
-# Install your app's Node.js dependencies (production only)
-RUN npm ci --production || npm install --production
+# Install dependencies using the more flexible 'npm install'
+# --omit=dev is the modern equivalent of --production
+RUN npm install --omit=dev
 
 # Copy the rest of your application code
 # (This will respect the .dockerignore file)
 COPY . .
 
-# Create a non-root user and group
-RUN addgroup --system node && adduser --system --group node
+# --- FIX 1: User 'node' already exists, so we just use it ---
+# Give the existing 'node' user ownership of the app directory
 RUN chown -R node:node /app
 
 # Declare volumes for persistent data
-# This signals that 'data/jobs' and 'shared' should be mounted
 VOLUME /app/data/jobs
 VOLUME /app/shared
 
