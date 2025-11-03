@@ -1,48 +1,30 @@
-# Use an official Node.js 20 image as the base
-FROM node:20-slim
+# Use an official Node.js runtime as a parent image
+FROM node:14-slim
 
 # Set the working directory inside the container
 WORKDIR /app
 
-# Install system dependencies: ffmpeg, yt-dlp, and python
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    wget \
-    ca-certificates \
-    python3 \
-    --no-install-recommends && \
-    \
-    # Now, install the LATEST yt-dlp binary directly
-    wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp && \
-    \
-    # Clean up apt cache
-    rm -rf /var/lib/apt/lists/*
-
-# Copy package.json and package-lock.json (if it exists)
+# Copy the package.json and package-lock.json (if present) to the container
 COPY package*.json ./
 
-# Install dependencies using the more flexible 'npm install'
-# --omit=dev is the modern equivalent of --production
-RUN npm install --omit=dev
+# Install dependencies
+RUN npm install --production --legacy-peer-deps
 
-# Copy the rest of your application code
-# (This will respect the .dockerignore file)
-COPY . .
+# Create a non-root user and group if not already present
+RUN getent group node || addgroup --system node && \
+    getent passwd node || adduser --system --group node
 
-# --- FIX 1: User 'node' already exists, so we just use it ---
-# Give the existing 'node' user ownership of the app directory
+# Change ownership of the app directory to the node user
 RUN chown -R node:node /app
 
-# Declare volumes for persistent data
-VOLUME /app/data/jobs
-VOLUME /app/shared
-
-# Run as the non-root user
+# Set the user to 'node' (non-root) to run the app
 USER node
 
-# Expose the port your app runs on
+# Copy the rest of the application code to the container
+COPY . .
+
+# Expose the port the app will run on
 EXPOSE 3000
 
-# The command to run your app
-CMD [ "npm", "start" ]
+# Run the application
+CMD ["npm", "start"]
